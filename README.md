@@ -1,4 +1,4 @@
-### - 19-06-2025: App still very early development
+## 19-06-2025: App still very early development
 
 # CipherCore SDXL - FAST Stable Diffusion XL Local Image Generator Web UI (GPU Optimized)
 [![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)  
