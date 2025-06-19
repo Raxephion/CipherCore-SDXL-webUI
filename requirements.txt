@@ -1,0 +1,11 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch
+torchvision
+torchaudio
+gradio
+diffusers
+transformers
+accelerate
+safetensors
+numpy
+Pillow
