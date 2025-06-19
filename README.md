@@ -53,8 +53,8 @@ SDXL is demanding, but this interface is designed to be as lightweight as possib
 - **Python:** 3.9 or higher. Ensure Python is installed and added to your system's PATH. You can download it from [https://www.python.org/downloads/windows/](https://www.python.org/downloads/windows/).
 - **Git:** Recommended for easy updates, but not required if you download the ZIP.
 - **Hardware:**
-  - **NVIDIA GPU is strongly recommended.** SDXL is resource-intensive.
-  - A minimum of **8GB VRAM** is recommended for generating 1024x1024 images. Users with 12GB+ VRAM will have a much smoother experience.
+  - **NVIDIA GPU.** SDXL is resource-intensive.
+  - A minimum of **6GB VRAM** is recommended.
   - A modern CPU. While CPU-only generation is possible, it is not practical for regular use.
   - **Important:** You must have up-to-date NVIDIA drivers. Use the `nvidia-smi` command in your terminal to check your driver's CUDA version compatibility. This is critical for the setup to succeed.
 - **Internet Connection:** Required for the initial setup and for downloading models from Hugging Face Hub.
