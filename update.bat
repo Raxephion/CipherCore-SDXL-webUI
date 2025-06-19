@@ -3,7 +3,7 @@ echo Updating the CipherCore Stable Diffusion XL Generator...
 
 :: Define the virtual environment directory name (must match setup.bat and run.bat)
 set VENV_DIR=venv
-set REPO_URL=https://github.com/Raxephion/CipherCore-SD-1.5-WebUI
+set REPO_URL=https://github.com/Raxephion/CipherCore-SDXL-webUI
 set TEMP_DIR=temp_extraction
 
 :: Change directory to the script's location
