@@ -4,7 +4,7 @@ echo Updating the CipherCore SDXL Generator...
 :: Define the virtual environment directory name (must match setup.bat and run.bat)
 set VENV_DIR=venv
 :: !!! IMPORTANT: Replace this with your actual GitHub repository URL !!!
-set REPO_URL=https://github.com/Raxephion/CipherCore-SDXL-WebUI
+set REPO_URL=https://github.com/Raxephion/CipherCore-SDXL-webUI.git
 set TEMP_DIR=temp_extraction
 
 :: Change directory to the script's location
