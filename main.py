@@ -3,7 +3,7 @@
 Created on Wed Sep 18 2024
 
 @author: raxephion
-Basic Stable Diffusion XL Gradio App with local/Hub models and GPU/CPU selection
+Basic Stable Diffusion XL Gradio App with local/Hub models (GPU-Only)
 Optimized for GPU usage with automatic FP16 and VRAM management.
 Modified to download Hub models to local MODELS_DIR (set to "checkpoints").
 """
@@ -14,10 +14,28 @@ from diffusers import StableDiffusionXLPipeline
 # Import commonly used schedulers
 from diffusers import DDPMScheduler, EulerDiscreteScheduler, DPMSolverMultistepScheduler, LMSDiscreteScheduler
 import os
+import sys
 from PIL import Image
 import time # Optional: for timing generation
 import random # Needed for random seed
-import numpy as np # Needed for MAX_SEED, even if not used directly with gr.Number(-1) input
+import numpy as np # Needed for MAX_SEED
+
+# --- GPU Check and Initialization ---
+# This application is GPU-only. Exit if CUDA is not available.
+if not torch.cuda.is_available():
+    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    print("!!! ERROR: No NVIDIA GPU detected by PyTorch.        !!!")
+    print("!!! This application requires a CUDA-enabled GPU.    !!!")
+    print("!!! Please check your NVIDIA drivers and PyTorch     !!!")
+    print("!!! installation, then restart the application.      !!!")
+    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    input("Press Enter to exit...") # Prevents the console from closing immediately
+    sys.exit(1)
+
+DEVICE = "cuda"
+print(f"CUDA available. Found {torch.cuda.device_count()} GPU(s).")
+if torch.cuda.device_count() > 0:
+    print(f"Using GPU 0: {torch.cuda.get_device_name(0)}")
 
 
 # --- Configuration ---
@@ -44,23 +62,9 @@ DEFAULT_HUB_MODELS = [
 # --- Constants for UI / Generation ---
 MAX_SEED = np.iinfo(np.int32).max
 
-# --- Determine available devices and set up options ---
-AVAILABLE_DEVICES = ["CPU"]
-if torch.cuda.is_available():
-    AVAILABLE_DEVICES.append("GPU")
-    print(f"CUDA available. Found {torch.cuda.device_count()} GPU(s).")
-    if torch.cuda.device_count() > 0:
-        print(f"Using GPU 0: {torch.cuda.get_device_name(0)}")
-else:
-    print("CUDA not available. GPU functionality will be disabled.")
-
-# --- SETTING GPU AS DEFAULT ---
-DEFAULT_DEVICE = "GPU" if "GPU" in AVAILABLE_DEVICES else "CPU"
-
 # --- Global state for the loaded pipeline ---
 current_pipeline = None
 current_model_id = None
-current_device_loaded = None
 
 # --- Helper function to list available local models ---
 def list_local_models(models_dir_param):
@@ -73,11 +77,11 @@ def list_local_models(models_dir_param):
     return local_models
 
 # --- Image Generation Function ---
-def generate_image(model_identifier, selected_device_str, prompt, negative_prompt, steps, cfg_scale, scheduler_name, size, seed, num_images):
-    global current_pipeline, current_model_id, current_device_loaded, SCHEDULER_MAP, MAX_SEED, MODELS_DIR
+def generate_image(model_identifier, prompt, negative_prompt, steps, cfg_scale, scheduler_name, size, seed, num_images):
+    global current_pipeline, current_model_id, SCHEDULER_MAP, MAX_SEED, MODELS_DIR, DEVICE
 
     if not model_identifier or model_identifier == "No models found":
-        raise gr.Error(f"No model selected or available. Please add models to '{MODELS_DIR}' or ensure Hub IDs are correct in the script.")
+        raise gr.Error(f"No model selected. Please add models to '{MODELS_DIR}' or check Hub IDs.")
     if not prompt:
         raise gr.Error("Please enter a prompt.")
 
@@ -85,55 +89,43 @@ def generate_image(model_identifier, selected_device_str, prompt, negative_promp
     if num_images_int <= 0:
          raise gr.Error("Number of images must be at least 1.")
 
-    device_to_use = "cuda" if selected_device_str == "GPU" and "GPU" in AVAILABLE_DEVICES else "cpu"
-    if selected_device_str == "GPU" and device_to_use == "cpu":
-         raise gr.Error("GPU selected but CUDA is not available. Ensure NVIDIA drivers and a CUDA-enabled PyTorch are installed correctly.")
-
     # Use FP16 for compatible GPUs for better performance, otherwise FP32
-    dtype_to_use = torch.float32
-    if device_to_use == "cuda":
-        if torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] >= 7:
-             dtype_to_use = torch.float16
-             print("Compatible GPU detected, using torch.float16 for better performance.")
-        else:
-             dtype_to_use = torch.float32
-             print("GPU does not support FP16 fully, using torch.float32.")
-
-    print(f"Attempting generation on device: {device_to_use}, using dtype: {dtype_to_use}")
+    dtype_to_use = torch.float16 if torch.cuda.get_device_capability(0)[0] >= 7 else torch.float32
+    if dtype_to_use == torch.float16:
+        print("Compatible GPU detected, using torch.float16 for better performance.")
+    else:
+        print("GPU may not fully support FP16, using torch.float32.")
 
     # Load or switch model if necessary
-    if current_pipeline is None or current_model_id != model_identifier or str(current_device_loaded) != device_to_use:
-        print(f"Loading model: {model_identifier} onto {device_to_use}...")
+    if current_pipeline is None or current_model_id != model_identifier:
+        print(f"Loading model: {model_identifier} onto {DEVICE}...")
         if current_pipeline is not None:
-             print(f"Unloading previous model '{current_model_id}' from {current_device_loaded}...")
+             print(f"Unloading previous model '{current_model_id}'...")
              del current_pipeline # De-reference to free memory
-             if str(current_device_loaded) == "cuda":
-                 torch.cuda.empty_cache() # Clear VRAM
-                 print("Cleared CUDA cache.")
+             torch.cuda.empty_cache() # Clear VRAM
+             print("Cleared CUDA cache.")
 
         try:
             is_local_path = os.path.isdir(model_identifier)
-            pipeline_class = StableDiffusionXLPipeline
             
             if is_local_path:
                  print(f"Loading local model from: {model_identifier}")
-                 pipeline = pipeline_class.from_pretrained(model_identifier, torch_dtype=dtype_to_use)
+                 pipeline = StableDiffusionXLPipeline.from_pretrained(model_identifier, torch_dtype=dtype_to_use)
             else:
                  print(f"Loading Hub model: {model_identifier} (will cache to '{MODELS_DIR}')")
-                 pipeline = pipeline_class.from_pretrained(
+                 pipeline = StableDiffusionXLPipeline.from_pretrained(
                      model_identifier,
                      torch_dtype=dtype_to_use,
                      cache_dir=MODELS_DIR
                  )
 
-            pipeline.to(device_to_use)
+            pipeline.to(DEVICE)
             current_pipeline = pipeline
             current_model_id = model_identifier
-            current_device_loaded = torch.device(device_to_use)
-            print(f"Model '{model_identifier}' loaded successfully on {current_device_loaded}.")
+            print(f"Model '{model_identifier}' loaded successfully on {DEVICE}.")
 
         except Exception as e:
-            current_pipeline, current_model_id, current_device_loaded = None, None, None
+            current_pipeline, current_model_id = None, None
             error_message_lower = str(e).lower()
             if "out of memory" in error_message_lower:
                  raise gr.Error(f"Out of VRAM loading model. Your GPU may not have enough memory for this model. Error: {e}")
@@ -156,11 +148,10 @@ def generate_image(model_identifier, selected_device_str, prompt, negative_promp
         raise gr.Error(f"Invalid size format: '{size}'. Use 'WidthxHeight' (e.g., 1024x1024).")
 
     # Prepare generator for seeding
-    generator = None
     seed_int = int(seed)
     if seed_int == -1:
         seed_int = random.randint(0, MAX_SEED)
-    generator = torch.Generator(device=device_to_use).manual_seed(seed_int)
+    generator = torch.Generator(device=DEVICE).manual_seed(seed_int)
 
     print(f"Generating {num_images_int} image(s) with seed {seed_int}...")
     start_time = time.time()
@@ -183,7 +174,7 @@ def generate_image(model_identifier, selected_device_str, prompt, negative_promp
     except Exception as e:
         error_message_lower = str(e).lower()
         if "out of memory" in error_message_lower:
-             raise gr.Error(f"Out of VRAM during generation. Try a smaller size, fewer images, or a less demanding model. Error: {e}")
+             raise gr.Error(f"Out of VRAM during generation. Try a smaller image size, fewer images, or a less demanding model. Error: {e}")
         else:
              raise gr.Error(f"Image generation failed: {e}")
 
@@ -208,13 +199,12 @@ else:
 scheduler_choices = list(SCHEDULER_MAP.keys())
 
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
-    gr.Markdown(f"# CipherCore Stable Diffusion XL Generator (GPU)")
+    gr.Markdown(f"# CipherCore Stable Diffusion XL Generator (GPU-Only)")
     gr.Markdown(f"Create images with SDXL models. Models from Hugging Face will be cached in the `./{MODELS_DIR}` directory.")
 
     with gr.Row():
         with gr.Column(scale=2):
             model_dropdown = gr.Dropdown(choices=initial_model_choices, value=initial_default_model, label="Select Model", interactive=model_dropdown_interactive)
-            device_dropdown = gr.Dropdown(choices=AVAILABLE_DEVICES, value=DEFAULT_DEVICE, label="Processing Device", interactive=len(AVAILABLE_DEVICES) > 1)
             prompt_input = gr.Textbox(label="Positive Prompt", placeholder="e.g., an astronaut riding a horse on mars, cinematic, dramatic", lines=3, autofocus=True)
             negative_prompt_input = gr.Textbox(label="Negative Prompt (Optional)", placeholder="e.g., blurry, low quality, deformed, watermark", lines=2)
 
@@ -237,16 +227,14 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
     generate_button.click(
         fn=generate_image,
-        inputs=[model_dropdown, device_dropdown, prompt_input, negative_prompt_input, steps_slider, cfg_slider, scheduler_dropdown, size_dropdown, seed_input, num_images_slider],
+        inputs=[model_dropdown, prompt_input, negative_prompt_input, steps_slider, cfg_slider, scheduler_dropdown, size_dropdown, seed_input, num_images_slider],
         outputs=[output_gallery, actual_seed_output]
     )
     
     gr.Markdown(f"--- \n **Note:** The first time you load a model, it will be downloaded and loaded into VRAM, which may take several minutes.")
 
 if __name__ == "__main__":
-    print("\n--- Starting CipherCore Stable Diffusion XL Generator (GPU Mode) ---")
-    print(f"CUDA Status: {'Available' if 'GPU' in AVAILABLE_DEVICES else 'Not Available'}")
-    print(f"Default Device: {DEFAULT_DEVICE}")
+    print("\n--- Starting CipherCore Stable Diffusion XL Generator (GPU-Only) ---")
     print(f"Models will be loaded from/cached to: {os.path.abspath(MODELS_DIR)}")
     demo.launch(show_error=True, inbrowser=True)
     print("Gradio interface closed.")
